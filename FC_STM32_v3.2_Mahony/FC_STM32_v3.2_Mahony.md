@@ -1,4 +1,4 @@
-# FC_STM32_v3.1_AHRS
+# FC_STM32_v3.2_Mahony
 
 ### STM32F411 Flight Controller — Mahony AHRS + Single-Loop PID
 

@@ -14,12 +14,12 @@ The internal structure is fundamentally different.
 
 Same as v1:
 
-| Component | Detail |
-|---|---|
-| MCU | STM32F411RE (NUCLEO-F411RE board) |
-| IMU | MPU6050 (I2C address 0x68, fast mode 400kHz) |
-| Motors | 4× brushless via ESC, PWM on TIM3 CH1–CH4 |
-| Telemetry | USART2 → USB (ST-Link virtual COM) |
+| Component | Detail                                       |
+| --------- | -------------------------------------------- |
+| MCU       | STM32F411RE (NUCLEO-F411RE board)            |
+| IMU       | MPU6050 (I2C address 0x68, fast mode 400kHz) |
+| Motors    | 4× brushless via ESC, PWM on TIM3 CH1–CH4    |
+| Telemetry | USART2 → USB (ST-Link virtual COM)           |
 
 ---
 
@@ -44,7 +44,7 @@ This project fixes both problems.
 
 **The problem with polling:**
 Every call to `MPU6050_ReadRaw()` in v1 read the sensor's output
-registers directly. These registers hold only the *most recent* sample
+registers directly. These registers hold only the _most recent_ sample
 and are overwritten every 1ms (at 1kHz). Polling at 100Hz means reading
 one sample and ignoring the 9 that arrived in between.
 
@@ -55,6 +55,7 @@ read however many samples have accumulated, at any time, without missing
 any data.
 
 **How to enable it (register sequence):**
+
 ```
 SMPLRT_DIV = 0x00     → sample rate = 1kHz / (1+0) = 1kHz
 CONFIG     = 0x01     → DLPF_CFG=1, BW=184Hz, gyro_rate stays 1kHz
@@ -67,6 +68,7 @@ Each sample is exactly 12 bytes: 6 bytes accel (XYZ) + 6 bytes gyro (XYZ).
 All values are big-endian signed 16-bit integers.
 
 **Reading the FIFO:**
+
 1. Read `FIFO_COUNT_H` + `FIFO_COUNT_L` (registers 0x72–0x73) → 2 bytes
 2. Divide by 12 → number of complete samples available
 3. Read that many 12-byte packets from register `FIFO_R_W` (0x74)
@@ -76,13 +78,16 @@ All values are big-endian signed 16-bit integers.
 When the MCU polls at 100Hz but the sensor writes at 125Hz
 (`SMPLRT_DIV=0x09`), the FIFO fills up slowly and eventually overflows.
 Observed output:
+
 ```
 FIFO: 12 → 24 → 36 → ... → 996 → RESET → 12 → ...
 ```
+
 Fix: drain ALL available samples every loop, not just one.
 
 **Stage B result (1kHz sensor + averaging):**
 With `SMPLRT_DIV=0x00` (1kHz) and a drain-all + average loop:
+
 ```
 got: 11
 got: 10
@@ -90,6 +95,7 @@ got: 11
 got: 11
 ...
 ```
+
 10–11 samples averaged per loop. Effective noise reduction: √10 ≈ 3.16×
 improvement in signal quality, at zero hardware cost.
 
@@ -151,9 +157,11 @@ written manually.
 **How to add a new sensor later:**
 Write `inertial_sensor_icm42688.c` with its own `probe()`, `init()`,
 and `read()`. Add one line to `IS_Init()` in `inertial_sensor.c`:
+
 ```c
 if (ICM42688_Backend_Probe(&ins->backend, hi2c) == HAL_OK) goto found;
 ```
+
 Nothing else changes. `main.c` does not know the sensor changed.
 
 ---
@@ -162,13 +170,13 @@ Nothing else changes. `main.c` does not know the sensor changed.
 
 These are the ArduPilot files that directly correspond to this project:
 
-| ArduPilot file | Equivalent here |
-|---|---|
-| `AP_InertialSensor.h/.cpp` | `inertial_sensor.h/.c` |
-| `AP_InertialSensor_Backend.h` | `inertial_sensor_backend.h` |
-| `AP_InertialSensor_Invensense.cpp` | `inertial_sensor_mpu6050.c` |
-| `ADD_BACKEND(...)` macro in `.cpp` | probe chain in `IS_Init()` |
-| `_publish_gyro()` accumulation | `mpu6050_read_avg()` sum loop |
+| ArduPilot file                     | Equivalent here               |
+| ---------------------------------- | ----------------------------- |
+| `AP_InertialSensor.h/.cpp`         | `inertial_sensor.h/.c`        |
+| `AP_InertialSensor_Backend.h`      | `inertial_sensor_backend.h`   |
+| `AP_InertialSensor_Invensense.cpp` | `inertial_sensor_mpu6050.c`   |
+| `ADD_BACKEND(...)` macro in `.cpp` | probe chain in `IS_Init()`    |
+| `_publish_gyro()` accumulation     | `mpu6050_read_avg()` sum loop |
 
 The main difference in ArduPilot: the backend runs in a **separate
 thread** (bus thread at high priority), and uses **DMA** for I2C
@@ -204,6 +212,7 @@ Core/
 ## main.c — Before vs. After
 
 **v1 (application knew everything):**
+
 ```c
 MPU6050_RawData_t    raw_data;
 MPU6050_ScaledData_t scaled_data;
@@ -223,6 +232,7 @@ while(1) {
 ```
 
 **v2 (application sees only attitude):**
+
 ```c
 InertialSensor_t ins;
 
@@ -246,28 +256,21 @@ scale factors, or FIFO logic. It only knows: initialize → calibrate → update
 
 ## Key Numbers to Remember
 
-| Parameter | v1 | v2 | Why changed |
-|---|---|---|---|
-| Sensor sample rate | ~125 Hz | 1000 Hz | `SMPLRT_DIV = 0x00` |
-| DLPF cutoff | 44 Hz (`0x03`) | 184 Hz (`0x01`) | Wider BW, let software filter |
-| Samples per loop | 1 | ~10–11 (averaged) | Drain-all FIFO strategy |
-| I2C clock | 100 kHz | 400 kHz | Required for 1kHz throughput |
-| Noise improvement | baseline | ~3× (√10) | Averaging effect |
-| Sensor swap cost | rewrite all | add one `.c` file | Frontend/backend split |
+| Parameter          | v1             | v2                | Why changed                   |
+| ------------------ | -------------- | ----------------- | ----------------------------- |
+| Sensor sample rate | ~125 Hz        | 1000 Hz           | `SMPLRT_DIV = 0x00`           |
+| DLPF cutoff        | 44 Hz (`0x03`) | 184 Hz (`0x01`)   | Wider BW, let software filter |
+| Samples per loop   | 1              | ~10–11 (averaged) | Drain-all FIFO strategy       |
+| I2C clock          | 100 kHz        | 400 kHz           | Required for 1kHz throughput  |
+| Noise improvement  | baseline       | ~3× (√10)         | Averaging effect              |
+| Sensor swap cost   | rewrite all    | add one `.c` file | Frontend/backend split        |
 
 ---
 
-## What Comes Next (Stage 2 and 3)
+## What Comes Next
 
-**Stage 2 — INT-pin driven sampling:**
-The MPU6050 has an INT pin that pulses every new sample (every 1ms
-at 1kHz). Connect it to an STM32 EXTI line. The ISR sets a flag.
-The main loop reads only when the flag is set. This eliminates the
-`FIFO_COUNT` polling and aligns the read precisely to the sensor's
-output rate. Requires: Timers/EXTI from the STM32 Timers/PWM/DMA course.
-
-**Stage 3 — RTOS-based separation:**
-Move `IS_Update()` into a high-priority FreeRTOS task running at 1kHz.
-Move the PID + motor mixing into a medium-priority task at 400Hz.
-Share data via a mutex-protected buffer. This is the exact architecture
-of ArduPilot running on ChibiOS. Requires: FreeRTOS course.
+**v3 — IIR Filter:**
+Add a software first-order IIR low-pass filter after FIFO averaging
+as a second smoothing stage, and correct the hardware DLPF cutoff
+from 184Hz to 42Hz to properly anti-alias for the 100Hz output rate.
+Only inertial_sensor_mpu6050.c changes — architecture intact.

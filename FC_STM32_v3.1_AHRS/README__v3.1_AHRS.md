@@ -173,19 +173,9 @@ Core/
 
 ## What Comes Next
 
-**Stage 2 — INT-pin driven sampling (v4):**
-Connect the MPU6050 INT pin to an STM32 EXTI line. An ISR sets a
-flag; the main loop reads only when the flag is set. This eliminates
-FIFO_COUNT polling and aligns reads precisely to the sensor's output
-rate. Requires: STM32 Timers/EXTI peripheral knowledge.
-
-**Stage 3 — RTOS-based separation (v5):**
-Move `IS_Update()` into a high-priority FreeRTOS task at 1 kHz.
-Move `AHRS_Update()` + PID into a medium-priority task at 400 Hz.
-Share data via a mutex-protected buffer. This is the exact architecture
-of ArduPilot on ChibiOS/NuttX. Requires: FreeRTOS course.
-
-**Algorithm upgrade (future):**
-Replace the complementary filter in `ahrs.c` with a Mahony or
-Madgwick filter — without touching any other file. This is exactly
-why the AHRS layer was separated in this version.
+**v3.2 — Mahony Filter:**
+Replace the complementary filter in ahrs.c with a Mahony filter
+operating in quaternion space — no gimbal lock, PI feedback from
+accelerometer, numerically stable at large angles.
+No other files change — this is exactly why the AHRS layer was
+separated in this version.
